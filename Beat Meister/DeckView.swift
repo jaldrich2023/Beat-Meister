@@ -12,13 +12,15 @@ struct DeckView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            nowPlaying
             WaveformView(seed: deck.track?.title ?? "", position: deck.position, color: color)
-                .frame(height: 70)
+                .frame(height: 56)
                 .opacity(deck.track == nil ? 0.25 : 1)
+            seekBar
 
             HStack(alignment: .center, spacing: 20) {
                 PlatterView(color: color, isPlaying: deck.isPlaying)
-                    .frame(width: 150, height: 150)
+                    .frame(width: 130, height: 130)
                 pitchControl
             }
             .frame(maxWidth: .infinity)
@@ -30,19 +32,16 @@ struct DeckView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center) {
             Text(deck.name)
                 .font(.system(size: 28, weight: .heavy, design: .rounded))
                 .foregroundStyle(color)
-            VStack(alignment: .leading) {
-                Text(deck.track?.title ?? "No Track Loaded")
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(deck.track?.artist ?? "Load a track from the library")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            Menu("Load") {
+                ForEach(Track.samples) { track in
+                    Button("\(track.title) — \(track.artist)") { deck.load(track) }
+                }
             }
+            .fixedSize()
             Spacer()
             VStack(alignment: .trailing) {
                 Text(deck.effectiveBPM.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? "--.-")
@@ -54,54 +53,138 @@ struct DeckView: View {
         }
     }
 
+    private var nowPlaying: some View {
+        HStack(alignment: .center, spacing: 14) {
+            AlbumArtView(track: deck.track, color: color)
+                .frame(width: 110, height: 110)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(deck.track?.title ?? "No Track Loaded")
+                    .font(.title3.weight(.bold))
+                    .lineLimit(1)
+                Text(deck.track?.album ?? "Use Load to choose a track")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(deck.track?.artist ?? " ")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var seekBar: some View {
+        VStack(spacing: 2) {
+            Slider(value: $deck.position, in: 0...1)
+                .tint(color)
+                .accessibilityLabel("\(deck.name) Seek")
+            HStack {
+                Text(elapsedString)
+                Spacer()
+                Text(remainingString)
+            }
+            .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(.secondary)
+        }
+        .disabled(deck.track == nil)
+    }
+
     private var pitchControl: some View {
         VStack(spacing: 6) {
             Text("PITCH")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
             VerticalSlider(value: $deck.pitch, range: -8...8, color: color)
-                .frame(width: 30, height: 120)
+                .frame(width: 30, height: 100)
             Text(deck.pitch.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always())) + "%")
                 .font(.system(.caption, design: .monospaced))
         }
     }
 
     private var transport: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button("CUE", action: deck.cue)
-                .buttonStyle(DeckButtonStyle(color: .orange))
+                .buttonStyle(DeckButtonStyle(color: .orange, width: 52))
+            Spacer(minLength: 0)
+            transportButton("backward.end.fill", label: "Previous Track") { deck.loadAdjacent(offset: -1) }
+            transportButton("gobackward.10", label: "Back 10 Seconds") { deck.skip(seconds: -10) }
             Button {
                 deck.togglePlay()
             } label: {
                 Image(systemName: deck.isPlaying ? "pause.fill" : "play.fill")
             }
-            .buttonStyle(DeckButtonStyle(color: .green))
+            .buttonStyle(DeckButtonStyle(color: .green, width: 52))
             .accessibilityLabel(deck.isPlaying ? "Pause" : "Play")
+            transportButton("goforward.10", label: "Forward 10 Seconds") { deck.skip(seconds: 10) }
+            transportButton("forward.end.fill", label: "Next Track") { deck.loadAdjacent(offset: 1) }
+            Spacer(minLength: 0)
             Button("SYNC") {}
-                .buttonStyle(DeckButtonStyle(color: color))
-            Spacer()
-            Text(timeString)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .buttonStyle(DeckButtonStyle(color: color, width: 56))
         }
         .disabled(deck.track == nil)
     }
 
-    private var timeString: String {
-        guard let duration = deck.track?.duration else { return "0:00 / 0:00" }
-        let elapsed = Duration.seconds(duration * deck.position)
-        let total = Duration.seconds(duration)
-        return "\(elapsed.formatted(.time(pattern: .minuteSecond))) / \(total.formatted(.time(pattern: .minuteSecond)))"
+    private func transportButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+        }
+        .buttonStyle(DeckButtonStyle(color: .white.opacity(0.8), width: 40))
+        .accessibilityLabel(label)
+    }
+
+    private var elapsedString: String {
+        let duration = deck.track?.duration ?? 0
+        return Duration.seconds(duration * deck.position).formatted(.time(pattern: .minuteSecond))
+    }
+
+    private var remainingString: String {
+        guard let duration = deck.track?.duration else { return "0:00" }
+        return "-" + Duration.seconds(duration * (1 - deck.position)).formatted(.time(pattern: .minuteSecond))
+    }
+}
+
+/// Album art for the loaded track. Real artwork isn't available yet, so this
+/// draws a placeholder cover tinted with the deck color.
+struct AlbumArtView: View {
+    var track: Track?
+    var color: Color
+
+    var body: some View {
+        ZStack {
+            if let track {
+                LinearGradient(colors: [color.opacity(0.7), Theme.background],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                VStack(spacing: 6) {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 34, weight: .bold))
+                    Text(track.album)
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                }
+                .foregroundStyle(.white.opacity(0.9))
+            } else {
+                Theme.background
+                Image(systemName: "photo")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(color.opacity(0.5), lineWidth: 1))
+        .accessibilityLabel(track.map { "Album art for \($0.album)" } ?? "No album art")
     }
 }
 
 struct DeckButtonStyle: ButtonStyle {
     var color: Color
+    var width: CGFloat = 64
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(.callout, design: .rounded).weight(.bold))
-            .frame(width: 64, height: 36)
+            .frame(width: width, height: 36)
             .foregroundStyle(color)
             .background(color.opacity(configuration.isPressed ? 0.35 : 0.12), in: .rect(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(color, lineWidth: 2))
@@ -207,4 +290,15 @@ struct VerticalSlider: View {
         .accessibilityAddTraits(.allowsDirectInteraction)
         .accessibilityValue(value.formatted(.number.precision(.fractionLength(1))))
     }
+}
+
+#Preview {
+    let deck = DeckModel(name: "A")
+    deck.load(Track.samples[0])
+    deck.position = 0.35
+    return DeckView(deck: deck, color: Theme.deckA)
+        .frame(width: 420)
+        .padding()
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
 }
