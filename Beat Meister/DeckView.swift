@@ -12,10 +12,10 @@ struct DeckView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            nowPlaying
+            infoScreen
             WaveformView(seed: deck.track?.title ?? "", position: deck.position, color: color)
                 .frame(height: 56)
-                .opacity(deck.track == nil ? 0.25 : 1)
+                .opacity(deck.track == nil ? 0.35 : 1)
             seekBar
 
             HStack(alignment: .center, spacing: 20) {
@@ -25,6 +25,7 @@ struct DeckView: View {
             }
             .frame(maxWidth: .infinity)
 
+            NeonLine(color: color, isLit: deck.isPlaying, thickness: 1.5)
             transport
         }
         .frame(maxWidth: .infinity)
@@ -32,10 +33,11 @@ struct DeckView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 12) {
             Text(deck.name)
-                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                .font(.system(size: 30, weight: .black, design: .rounded))
                 .foregroundStyle(color)
+                .shadow(color: color.opacity(0.7), radius: 4)
             Menu("Load") {
                 ForEach(Track.samples) { track in
                     Button("\(track.title) — \(track.artist)") { deck.load(track) }
@@ -43,49 +45,65 @@ struct DeckView: View {
             }
             .fixedSize()
             Spacer()
-            VStack(alignment: .trailing) {
-                Text(deck.effectiveBPM.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? "--.-")
-                    .font(.system(.title2, design: .monospaced).weight(.bold))
-                Text("BPM · \(deck.track?.key ?? "--")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("DECK \(deck.name)")
+                .font(.caption.weight(.heavy))
+                .tracking(2)
+                .foregroundStyle(.white.opacity(0.55))
         }
     }
 
-    private var nowPlaying: some View {
-        HStack(alignment: .center, spacing: 14) {
+    /// Backlit LCD showing album art, track details, BPM and key.
+    private var infoScreen: some View {
+        HStack(alignment: .center, spacing: 12) {
             AlbumArtView(track: deck.track, color: color)
-                .frame(width: 110, height: 110)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(deck.track?.title ?? "No Track Loaded")
-                    .font(.title3.weight(.bold))
+                .frame(width: 96, height: 96)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(deck.track?.title.uppercased() ?? "NO TRACK LOADED")
+                    .font(.system(.headline, design: .monospaced).weight(.bold))
                     .lineLimit(1)
                 Text(deck.track?.album ?? "Use Load to choose a track")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(Theme.lcdDim)
                     .lineLimit(1)
                 Text(deck.track?.artist ?? " ")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(color)
+                    .font(.system(.subheadline, design: .monospaced))
                     .lineLimit(1)
+                Spacer(minLength: 2)
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    lcdReadout(deck.effectiveBPM.map { $0.formatted(.number.precision(.fractionLength(1))) } ?? "---.-",
+                               label: "BPM", size: 22)
+                    lcdReadout(deck.track?.key ?? "--", label: "KEY", size: 15)
+                    lcdReadout(deck.pitch.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always())) + "%",
+                               label: "PITCH", size: 15)
+                }
             }
             Spacer(minLength: 0)
+        }
+        .frame(height: 96)
+        .lcdPanel(accent: color)
+    }
+
+    private func lcdReadout(_ value: String, label: String, size: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(value)
+                .font(.system(size: size, weight: .bold, design: .monospaced))
+            Text(label)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(Theme.lcdDim)
         }
     }
 
     private var seekBar: some View {
         VStack(spacing: 2) {
-            Slider(value: $deck.position, in: 0...1)
-                .tint(color)
+            MetalSlider(value: $deck.position, range: 0...1, color: color)
                 .accessibilityLabel("\(deck.name) Seek")
             HStack {
                 Text(elapsedString)
                 Spacer()
                 Text(remainingString)
             }
-            .font(.system(.caption, design: .monospaced))
-            .foregroundStyle(.secondary)
+            .font(.system(.caption, design: .monospaced).weight(.semibold))
+            .foregroundStyle(.white.opacity(0.7))
         }
         .disabled(deck.track == nil)
     }
@@ -93,19 +111,18 @@ struct DeckView: View {
     private var pitchControl: some View {
         VStack(spacing: 6) {
             Text("PITCH")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.caption2.weight(.heavy))
+                .foregroundStyle(.white.opacity(0.7))
             VerticalSlider(value: $deck.pitch, range: -8...8, color: color)
                 .frame(width: 30, height: 100)
-            Text(deck.pitch.formatted(.number.precision(.fractionLength(1)).sign(strategy: .always())) + "%")
-                .font(.system(.caption, design: .monospaced))
+                .accessibilityLabel("\(deck.name) Pitch")
         }
     }
 
     private var transport: some View {
         HStack(spacing: 8) {
             Button("CUE", action: deck.cue)
-                .buttonStyle(DeckButtonStyle(color: .orange, width: 52))
+                .buttonStyle(MetalButtonStyle(color: .orange, width: 52))
             Spacer(minLength: 0)
             transportButton("backward.end.fill", label: "Previous Track") { deck.loadAdjacent(offset: -1) }
             transportButton("gobackward.10", label: "Back 10 Seconds") { deck.skip(seconds: -10) }
@@ -114,13 +131,13 @@ struct DeckView: View {
             } label: {
                 Image(systemName: deck.isPlaying ? "pause.fill" : "play.fill")
             }
-            .buttonStyle(DeckButtonStyle(color: .green, width: 52))
+            .buttonStyle(MetalButtonStyle(color: .green, width: 52, isActive: deck.isPlaying))
             .accessibilityLabel(deck.isPlaying ? "Pause" : "Play")
             transportButton("goforward.10", label: "Forward 10 Seconds") { deck.skip(seconds: 10) }
             transportButton("forward.end.fill", label: "Next Track") { deck.loadAdjacent(offset: 1) }
             Spacer(minLength: 0)
             Button("SYNC") {}
-                .buttonStyle(DeckButtonStyle(color: color, width: 56))
+                .buttonStyle(MetalButtonStyle(color: color, width: 56))
         }
         .disabled(deck.track == nil)
     }
@@ -129,7 +146,7 @@ struct DeckView: View {
         Button(action: action) {
             Image(systemName: systemImage)
         }
-        .buttonStyle(DeckButtonStyle(color: .white.opacity(0.8), width: 40))
+        .buttonStyle(MetalButtonStyle(color: .white.opacity(0.9), width: 40))
         .accessibilityLabel(label)
     }
 
@@ -157,7 +174,7 @@ struct AlbumArtView: View {
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                 VStack(spacing: 6) {
                     Image(systemName: "music.note")
-                        .font(.system(size: 34, weight: .bold))
+                        .font(.system(size: 30, weight: .bold))
                     Text(track.album)
                         .font(.caption2.weight(.semibold))
                         .lineLimit(1)
@@ -165,29 +182,16 @@ struct AlbumArtView: View {
                 }
                 .foregroundStyle(.white.opacity(0.9))
             } else {
-                Theme.background
+                Color.black.opacity(0.3)
                 Image(systemName: "photo")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 26))
+                    .foregroundStyle(Theme.lcdDim)
             }
         }
-        .clipShape(.rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(color.opacity(0.5), lineWidth: 1))
+        .clipShape(.rect(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.lcdText.opacity(0.3), lineWidth: 1))
+        .shadow(radius: 0)
         .accessibilityLabel(track.map { "Album art for \($0.album)" } ?? "No album art")
-    }
-}
-
-struct DeckButtonStyle: ButtonStyle {
-    var color: Color
-    var width: CGFloat = 64
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(.callout, design: .rounded).weight(.bold))
-            .frame(width: width, height: 36)
-            .foregroundStyle(color)
-            .background(color.opacity(configuration.isPressed ? 0.35 : 0.12), in: .rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(color, lineWidth: 2))
     }
 }
 
@@ -218,35 +222,58 @@ struct WaveformView: View {
             let playheadX = size.width * position
             context.fill(Path(CGRect(x: playheadX - 1, y: 0, width: 2, height: size.height)), with: .color(.white))
         }
-        .background(Theme.background, in: .rect(cornerRadius: 6))
+        .padding(.horizontal, 4)
+        .background(Color.black.opacity(0.75), in: .rect(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Metal.bevel, lineWidth: 1).rotationEffect(.degrees(180)))
     }
 }
 
-/// Static jog wheel graphic.
+/// Static jog wheel graphic: chrome rim, steady neon ring, vinyl grooves
+/// and a spun-metal center cap.
 struct PlatterView: View {
     var color: Color
     var isPlaying: Bool
 
     var body: some View {
         ZStack {
+            // Chrome outer rim.
+            Circle().fill(Metal.spun)
+            Circle().fill(Metal.gloss)
+            Circle().strokeBorder(Metal.bevel, lineWidth: 1.5)
+            // Neon ring.
             Circle()
-                .fill(Theme.background)
+                .strokeBorder(color.opacity(isPlaying ? 1 : 0.6), lineWidth: 3)
+                .shadow(color: color.opacity(isPlaying ? 0.9 : 0.5), radius: 5)
+                .padding(8)
+            // Vinyl with grooves.
             Circle()
-                .strokeBorder(color.opacity(isPlaying ? 1 : 0.5), lineWidth: 4)
-            ForEach(0..<12) { index in
-                Capsule()
-                    .fill(.white.opacity(0.15))
-                    .frame(width: 2, height: 14)
-                    .offset(y: -58)
-                    .rotationEffect(.degrees(Double(index) * 30))
+                .fill(RadialGradient(colors: [Color(white: 0.16), Color(white: 0.05)],
+                                     center: .center, startRadius: 0, endRadius: 55))
+                .padding(12)
+            ForEach(0..<6) { ring in
+                Circle()
+                    .stroke(.white.opacity(0.05), lineWidth: 1)
+                    .padding(CGFloat(18 + ring * 6))
             }
+            // Glossy vinyl sheen.
             Circle()
-                .fill(color.opacity(0.2))
-                .frame(width: 50, height: 50)
-            Circle()
-                .fill(.white)
-                .frame(width: 8, height: 8)
+                .fill(AngularGradient(colors: [.clear, .white.opacity(0.10), .clear, .clear,
+                                               .white.opacity(0.10), .clear, .clear],
+                                      center: .center))
+                .padding(12)
+            // Center cap with a neon position marker.
+            ZStack {
+                Circle().fill(Metal.spun)
+                Circle().strokeBorder(Metal.bevel, lineWidth: 1)
+                Capsule()
+                    .fill(color)
+                    .frame(width: 3, height: 12)
+                    .offset(y: -12)
+            }
+            .frame(width: 44, height: 44)
+            .shadow(color: .black.opacity(0.7), radius: 3, y: 2)
         }
+        .shadow(color: .black.opacity(0.6), radius: 6, y: 4)
         .accessibilityHidden(true)
     }
 }
@@ -261,15 +288,15 @@ struct VerticalSlider: View {
         GeometryReader { geometry in
             let span = range.upperBound - range.lowerBound
             let fraction = (value - range.lowerBound) / span
-            let capHeight: CGFloat = 16
+            let capHeight: CGFloat = 18
             let travel = geometry.size.height - capHeight
             ZStack(alignment: .top) {
                 Capsule()
-                    .fill(Theme.background)
+                    .fill(Metal.slot)
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
                     .frame(width: 6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(color)
+                FaderCap(color: color)
                     .frame(width: geometry.size.width, height: capHeight)
                     .offset(y: travel * (1 - fraction))
             }

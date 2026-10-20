@@ -13,9 +13,14 @@ struct MixerView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("MIXER")
-                .font(.system(.headline, design: .rounded).weight(.heavy))
-                .foregroundStyle(Theme.mixer)
+            VStack(spacing: 6) {
+                Text("MIXER")
+                    .font(.system(.headline, design: .rounded).weight(.black))
+                    .tracking(3)
+                    .foregroundStyle(Theme.mixer)
+                    .shadow(color: Theme.mixer.opacity(0.7), radius: 4)
+                NeonLine(color: Theme.mixer, isLit: deckA.isPlaying || deckB.isPlaying, thickness: 1.5)
+            }
 
             HStack(alignment: .top, spacing: 24) {
                 ChannelStrip(deck: deckA, color: Theme.deckA)
@@ -23,15 +28,14 @@ struct MixerView: View {
             }
 
             VStack(spacing: 4) {
-                Slider(value: $crossfader, in: -1...1)
-                    .tint(Theme.mixer)
+                MetalSlider(value: $crossfader, range: -1...1, color: Theme.mixer, fillFromCenter: true)
                     .accessibilityLabel("Crossfader")
                 HStack {
                     Text("A").foregroundStyle(Theme.deckA)
                     Spacer()
                     Text("B").foregroundStyle(Theme.deckB)
                 }
-                .font(.caption.weight(.bold))
+                .font(.caption.weight(.heavy))
             }
             .onTapGesture(count: 2) { crossfader = 0 }
         }
