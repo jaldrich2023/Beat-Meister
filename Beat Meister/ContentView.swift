@@ -6,54 +6,34 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var deckA = DeckModel(name: "A")
+    @State private var deckB = DeckModel(name: "B")
+    @State private var crossfader: Double = 0
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        VStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
+                DeckView(deck: deckA, color: Theme.deckA)
+                MixerView(deckA: deckA, deckB: deckB, crossfader: $crossfader)
+                DeckView(deck: deckB, color: Theme.deckB)
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+
+            LibraryView(tracks: Track.samples) { track, side in
+                switch side {
+                case .a: deckA.load(track)
+                case .b: deckB.load(track)
                 }
             }
-        } detail: {
-            Text("Select an item")
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
+        .padding(20)
+        .frame(minWidth: 1100, minHeight: 760)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
