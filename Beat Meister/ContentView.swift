@@ -18,8 +18,10 @@ struct ContentView: View {
             MixerView(deckA: deckA, deckB: deckB, crossfader: $crossfader)
             DeckView(deck: deckB, color: Theme.deckB)
         }
+        // Size the row to its tallest panel so all three panels match.
+        .fixedSize(horizontal: false, vertical: true)
         .padding(20)
-        .frame(minWidth: 1180, minHeight: 640)
+        .frame(minWidth: 1180, minHeight: 720)
         .background(Theme.background)
         .preferredColorScheme(.dark)
     }
