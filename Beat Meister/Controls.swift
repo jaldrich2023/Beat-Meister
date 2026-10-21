@@ -78,9 +78,11 @@ struct Knob: View {
                     }
                     .onEnded { _ in dragStart = nil }
             )
-            .onTapGesture(count: 2) {
+            // Simultaneous, so the drag (which starts on mouse-down) doesn't
+            // swallow the clicks.
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
                 value = (range.lowerBound + range.upperBound) / 2
-            }
+            })
             .accessibilityElement()
             .accessibilityLabel(label)
             .accessibilityValue(value.formatted(.number.precision(.fractionLength(2))))
@@ -236,9 +238,11 @@ struct VerticalFader: View {
                         value = range.lowerBound + min(max(newFraction, 0), 1) * span
                     }
             )
-            .onTapGesture(count: 2) {
+            // Simultaneous, so the drag (which starts on mouse-down) doesn't
+            // swallow the clicks.
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
                 value = (range.lowerBound + range.upperBound) / 2
-            }
+            })
         }
         .accessibilityElement()
         .accessibilityValue(value.formatted(.number.precision(.fractionLength(1))))
@@ -280,9 +284,11 @@ struct HorizontalFader: View {
                         value = range.lowerBound + min(max(newFraction, 0), 1) * span
                     }
             )
-            .onTapGesture(count: 2) {
+            // Simultaneous, so the drag (which starts on mouse-down) doesn't
+            // swallow the clicks.
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
                 value = (range.lowerBound + range.upperBound) / 2
-            }
+            })
         }
         .frame(height: 34)
         .accessibilityElement()
@@ -437,10 +443,45 @@ struct RubberButtonStyle: ButtonStyle {
 /// CDJ-style jog wheel: chrome bezel, steady illumination ring, knurled
 /// rubber edge, brushed-aluminium top plate and a center jog display.
 struct JogWheel: View {
+    /// The part of the wheel a drag started on, which sets the seek rate.
+    enum Zone {
+        /// The top platter: coarse seeking.
+        case platter
+        /// The knurled outer ring: fine seeking.
+        case ring
+
+        /// Seconds of track traveled per full clockwise revolution.
+        var secondsPerRevolution: Double {
+            switch self {
+            case .platter: 16
+            case .ring: 1.8   // About one turn of a 33⅓ RPM record.
+            }
+        }
+    }
+
     var color: Color
     var isPlaying: Bool
     var position: Double
+    /// Track position at which the jog display's marker points to 12 o'clock.
+    var markerOrigin: Double = 0
     var size: CGFloat = 170
+    /// Called while the wheel is turned, with seconds to move (negative is backward).
+    var onSeek: (TimeInterval) -> Void = { _ in }
+    /// Called with true when the wheel starts turning and false when it's released.
+    var onTouch: (Bool) -> Void = { _ in }
+    /// Called when the wheel is double-clicked.
+    var onDoubleClick: () -> Void = {}
+
+    @State private var dragZone: Zone?
+    @State private var lastAngle: Angle?
+    /// True once the drag has actually turned the wheel.
+    @State private var isTurning = false
+    /// Rotation collected before the turn threshold is reached.
+    @State private var pendingDegrees: Double = 0
+
+    /// Rotation needed before a press counts as turning. Keeps clicks and
+    /// double-clicks from interrupting playback.
+    private let turnThreshold: Double = 1.5
 
     var body: some View {
         ZStack {
@@ -453,13 +494,79 @@ struct JogWheel: View {
             KnurledRing(ridges: 110)
                 .padding(9)
             topPlate
-                .padding(size * 0.12)
-            JogDisplay(color: color, position: position, diameter: size * 0.42)
+                .padding(size * (0.5 - platterRadiusFraction))
+            JogDisplay(color: color, position: position, markerOrigin: markerOrigin, diameter: size * 0.42)
         }
         .frame(width: size, height: size)
+        .contentShape(Circle())
+        .gesture(rotation)
+        .simultaneousGesture(TapGesture(count: 2).onEnded { onDoubleClick() })
         .shadow(color: .black.opacity(0.7), radius: 8, y: 5)
-        .accessibilityHidden(true)
+        .accessibilityElement()
+        .accessibilityLabel("Jog Wheel")
+        .accessibilityHint("Turn to seek through the track. Double-click to reset the marker to 12 o’clock.")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onSeek(1)
+            case .decrement: onSeek(-1)
+            @unknown default: break
+            }
+        }
     }
+
+    /// Converts circular dragging into seek amounts. The zone is chosen where
+    /// the drag begins, so sliding across the boundary mid-turn doesn't
+    /// change the rate.
+    private var rotation: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+                let center = CGPoint(x: size / 2, y: size / 2)
+                let dx = drag.location.x - center.x
+                let dy = drag.location.y - center.y
+                // Ignore the dead spot at the very center, where angles jump.
+                guard hypot(dx, dy) > size * 0.06 else { return }
+                // Screen y points down, so increasing angles run clockwise.
+                let angle = Angle(radians: atan2(dy, dx))
+
+                if dragZone == nil {
+                    let start = drag.startLocation
+                    let startRadius = hypot(start.x - center.x, start.y - center.y)
+                    dragZone = startRadius < size * platterRadiusFraction ? .platter : .ring
+                }
+                if let lastAngle, let dragZone {
+                    var delta = angle.degrees - lastAngle.degrees
+                    // Unwrap across the ±180° seam.
+                    if delta > 180 { delta -= 360 }
+                    if delta < -180 { delta += 360 }
+
+                    if !isTurning {
+                        pendingDegrees += delta
+                        if abs(pendingDegrees) >= turnThreshold {
+                            isTurning = true
+                            onTouch(true)
+                            delta = pendingDegrees
+                        }
+                    }
+                    if isTurning {
+                        onSeek(delta / 360 * dragZone.secondsPerRevolution)
+                    }
+                }
+                lastAngle = angle
+            }
+            .onEnded { _ in
+                if isTurning {
+                    onTouch(false)
+                }
+                dragZone = nil
+                lastAngle = nil
+                isTurning = false
+                pendingDegrees = 0
+            }
+    }
+
+    /// Radius of the top platter as a fraction of the wheel's diameter.
+    /// Also sets the platter's inset, so the drawing and the zones agree.
+    private let platterRadiusFraction: CGFloat = 0.38
 
     private var topPlate: some View {
         ZStack {
@@ -480,6 +587,8 @@ struct JogWheel: View {
 struct JogDisplay: View {
     var color: Color
     var position: Double
+    /// Position at which the marker points to 12 o'clock.
+    var markerOrigin: Double = 0
     var diameter: CGFloat
 
     var body: some View {
@@ -504,7 +613,7 @@ struct JogDisplay: View {
                 .fill(.white)
                 .frame(width: 3, height: 9)
                 .offset(y: -radius + 8)
-                .rotationEffect(.degrees(position * 360 * 12))
+                .rotationEffect(.degrees((position - markerOrigin) * 360 * 12))
             Circle()
                 .strokeBorder(.black, lineWidth: 3)
             Circle()
